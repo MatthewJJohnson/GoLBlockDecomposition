@@ -6,32 +6,23 @@
 #include <math.h>
 
 #define ROOT 0
+#define ALIVE 1
+#define DEAD 0
+#define BIGPRIME 68111 //some reasonably big prime number
 
 // Joshua Feltman
 // Matthew Johnson
 // CS411 Project 2
 
+int width, genCount, displayCount, liveCount, deadCount, rank, p;
+
 int main(int argc,char *argv[])
 {
-    int rank,p;
-    int width, genCount;
-
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&p);
 
     srand(time(NULL));
-
-    printf("Checking that the number of processors is power of 2...\n");
-    if(p != 0 && (p & (p - 1)) == 0) 
-    {
-        printf("Pass.\n");
-    }
-    else
-    {
-        printf("Fail.\n");
-        return 1;
-    }
 
     printf("my rank=%d\n",rank);
     printf("Rank=%d: number of processes =%d\n",rank,p);
@@ -41,8 +32,24 @@ int main(int argc,char *argv[])
 
     width = atoi(tempWidth);
     genCount = atoi(tempG);
-
+    displayCount = genCount;//we will simply display after each generation
     printf("N = %d, G = %d\n", width, genCount);
+
+    printf("Checking that the number of processors is power of 2 and N is divisible by p...\n");
+    if(p != 0 && (p & (p - 1)) == 0 && width % p == 0) 
+    {
+        printf("Pass.\n");
+    }
+    else
+    {
+        printf("Fail. Aborting.\n");
+        return 1;
+    }
+
+    //nxn matrix. Block composition states that a processor owns [width/p][width] cells (or [width][width/p] cells) of the matrix
+    //we will implement the [width/p][width] method. (row decomposition)
+
+    int miniMatrix[width/p][width];
 
     if(rank == ROOT)
     {
@@ -65,6 +72,11 @@ int main(int argc,char *argv[])
 }
 
 void GenerateInitialGoL(int *rank, int *p){
+//Two Step function
+//Step One: rank 0 generates p random prime numbers and <i>distributes</i> them to the other ranks. Instuctor hinted at the MPI function, 'MPI_Scatter'
+//Step Two: Each rank locally generates (using the passed seed) a distinct sequence of values to fill in the matrix as alive or dead. 
+
+//Step One
     
 }
 
