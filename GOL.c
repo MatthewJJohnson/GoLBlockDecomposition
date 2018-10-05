@@ -86,8 +86,6 @@ void DisplayGoL(){
 
 }
 
-https://github.com/msteinkamp/parallel-game-of-life/blob/master/split_life_game.cpp
-
 
 
 
