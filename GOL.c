@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <mpi.h>
 #include <assert.h>
 #include <sys/time.h>
@@ -18,7 +19,9 @@ int main(int argc,char *argv[])
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&p);
-    
+
+    srand(time(NULL));
+
     printf("Checking that the number of processors is power of 2...\n");
     if(p != 0 && (p & (p - 1)) == 0) 
     {
@@ -43,7 +46,7 @@ int main(int argc,char *argv[])
 
     if(rank == ROOT)
     {
-	int i = 1;
+	    int i = 1;
         for (i; i < p; i++)
         {
             MPI_Send(&width, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
@@ -51,7 +54,7 @@ int main(int argc,char *argv[])
     }
     else
     {
-	MPI_Status status;
+        MPI_Status status;
 
         MPI_Recv(&width, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         printf("Process %d received the width of the board as %d from process 0\n", rank, width);
