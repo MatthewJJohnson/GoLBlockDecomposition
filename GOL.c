@@ -23,6 +23,8 @@ int main(int argc,char *argv[])
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&p);
 
+    srand(time(NULL));
+
     printf("my rank=%d\n",rank);
     printf("Rank=%d: number of processes =%d\n",rank,p);
     
@@ -53,37 +55,39 @@ int main(int argc,char *argv[])
     GenerateInitialGoL(miniMatrix);
 
     MPI_Finalize();    
+
+    return 0;
 }
 
-void GenerateInitialGoL(int miniMatrix[n][]){
-//Two Step function
-//Step One: rank 0 generates p random prime numbers and <i>distributes</i> them to the other ranks. Instuctor hinted at the MPI function, 'MPI_Scatter'
-//Step Two: Each rank locally generates (using the passed seed) a distinct sequence of values to fill in the matrix as alive or dead. 
+void GenerateInitialGoL(int miniMatrix[][width/p]){
+    //Two Step function
+    //Step One: rank 0 generates p random prime numbers and <i>distributes</i> them to the other ranks. Instuctor hinted at the MPI function, 'MPI_Scatter'
+    //Step Two: Each rank locally generates (using the passed seed) a distinct sequence of values to fill in the matrix as alive or dead. 
 
-//Step One
+    //Step One
     //REF: www.mpi-forum.org/docs/mpi-1.1/mpi-11-html/node72.html
-    int scatteredSeed;//save our seed from the scatter
+    int scatteredSeed = 0;//save our seed from the scatter
     int toBeScattered[p];//MPI_Scatter takes a sendbuf (toBeScattered) and splits the buffer between the processes. buffer is size p for p processes 
     
-    srand(time(NULL));
     if(rank == ROOT){
-        int i=0;//must define outside for loop in MPI
-        for(i; i<p;i++){
-            toBeScattered[i] = rand() % BIGPRIME+1; //rand starts at 0, off by 1
-
+        int i = 0; //must define outside for loop in MPI
+        for(i; i < p; i++){
+            toBeScattered[i] = rand() % BIGPRIME + 1; //rand starts at 0, off by 1
         }
     }
-    MPI_Scatter(toBeScattered, 1, MPI_INT, &scatteredSeed, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    
-//Step Two
-    srand(time(NULL)+scatteredSeed);//redefine random seed
+    MPI_Scatter(toBeScattered, 1, MPI_INT, &scatteredSeed, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    printf("RANK: %d recieves random number: %d\n", rank, scatteredSeed);
+
+    //Step Two
+    srand(time(NULL) + scatteredSeed); //redefine random with the seed since every rank after root was getting the same value 
     int index=0;
-    int parity;
-    for(index;index<(width/p)*width;index++){
-        parity = rand()%BIGPRIME+1;
+    for(index; index < (width*width)/p; index++){
+        int parity = rand() % BIGPRIME + 1;
+
         //50-50 chance of a cell being alive or dead based on if the status of even or odd (parity)
         printf("Processor %d generated Cell[%d][%d] as ", rank, index%width, index/width);
-        if(parity % 2 != 0){
+        if(parity % 2 == 0){
             miniMatrix[index%width][index/width] = ALIVE;
             printf("ALIVE\n");
         }
@@ -93,7 +97,7 @@ void GenerateInitialGoL(int miniMatrix[n][]){
         }
     }
 
-//Verification Step
+    //Verification Step
     //DisplayGoL();
 }
 
@@ -101,7 +105,17 @@ void Simulate(){
 
 }
 
-void DisplayGoL(){
+// in progress
+void DisplayGoL(int miniMatrix[][width/p]){
+    int fullMatrix[width][width];
+   
+    int toBeGathered[p];
+    int gatheredSeed = 0;
+
+    int i = 0;
+//    for(i; i < p; i++) {
+//        toBeGathered[i] = 
+//    }
 
 }
 
