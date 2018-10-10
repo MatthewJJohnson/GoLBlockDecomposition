@@ -4,7 +4,6 @@
 # note: the format is hr:min:sec (default set here to 10 mins)
 #SBATCH --time=00:10:00
 
-
 #"np" stands for number of processes.
 #this command will run the job on 2 processes. 
-mpirun -np 8 ~/GoLBlockDecomposition/GOL 16 4
+mpirun -np 4 ~/GoLBlockDecomposition/GOL 8 4
