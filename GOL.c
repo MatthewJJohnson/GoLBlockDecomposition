@@ -126,11 +126,13 @@ int DetermineState(int miniMatrix[][width], int row, int col) {
 // Finished, just need to implement DetermineState
 void Simulate(int miniMatrix[][width]) {
     int i, j;
+    int tempMiniMatrix[width/p][width];
 
     for(i = 0; i < genCount; i++) {
         // Make sure each process finishes the generation before starting the next one
         MPI_Barrier(MPI_COMM_WORLD);
 
+        // (width^2)/p is number of elements in the miniMatrix
         for(j = 0; j < (width * width)/p; j++) {
             int cellRow, cellColumn;
             // Get the coord of cell (based on full matrix (width x width)
@@ -140,8 +142,14 @@ void Simulate(int miniMatrix[][width]) {
 
             int newState = DetermineState(miniMatrix, cellRow, cellColumn);
 
-            miniMatrix[j/width][j%width] = newState;
+            // Make a copy of the MiniMatrix with the new states
+            tempMiniMatrix[j/width][j%width] = newState;
         }
+
+        // After check all the states, update the miniMatrix with the new states
+        // This is because we use the prev gen for all of the checking so we cant update the board as we 
+        // check or it break the game rules
+        memcpy(miniMatrix, tempMiniMatrix, sizeof(tempMiniMatrix));
 
         // Display buffer 
         if(i % displayCount == 0) {
