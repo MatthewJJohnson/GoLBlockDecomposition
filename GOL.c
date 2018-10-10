@@ -108,8 +108,8 @@ void GenerateInitialGoL(int miniMatrix[][width]){
 // Return the new state of a given cell
 // Need to get the cell's 8 neighbors (will need to send/recv rows from other processors since
 //  we're using a TORUS topology)
-int DetermineState(int miniMatrix[][width], int row, int col) {
-    
+int DetermineState(int miniMatrix[][width], int row, int col, int cellRank) {
+
     // p-1 <-> p <-> p+1
     // Need to send miniMatrix row to both p-1 and p+1
     // Need to recieve a miniMatrix row from both p-1 and p+1
@@ -140,7 +140,7 @@ void Simulate(int miniMatrix[][width]) {
             // fullMatrixRow =  row index from miniMatrix + (numRows * processor#)
             cellRow = (j/width) + (width/p) * rank;
 
-            int newState = DetermineState(miniMatrix, cellRow, cellColumn);
+            int newState = DetermineState(miniMatrix, cellRow, cellColumn, rank);
 
             // Make a copy of the MiniMatrix with the new states
             tempMiniMatrix[j/width][j%width] = newState;
