@@ -33,7 +33,7 @@ int main(int argc,char *argv[])
 
     width = atoi(tempWidth);
     genCount = atoi(tempG);
-    displayCount = genCount;//we will simply display after each generation
+    displayCount = 1; //we will simply display after each generation, e.g. 2 would be after every other gen
     printf("N = %d, G = %d\n", width, genCount);
 
     printf("Checking that the number of processors is power of 2 and N is divisible by p...\n");
@@ -53,7 +53,9 @@ int main(int argc,char *argv[])
 
     //no need to broadcast p since its global now, begin execution
     int miniMatrix[width/p][width];    
+
     GenerateInitialGoL(miniMatrix);
+    Simulate(miniMatrix);
 
     MPI_Finalize();
 
@@ -99,11 +101,53 @@ void GenerateInitialGoL(int miniMatrix[][width]){
     }
 
     //Verification Step
-    DisplayGoL(miniMatrix);
+    DisplayGoL(miniMatrix, 0);
 }
 
-void Simulate(){
+// TODO
+// Return the new state of a given cell
+// Need to get the cell's 8 neighbors (will need to send/recv rows from other processors since
+//  we're using a TORUS topology)
+int DetermineState(int miniMatrix[][width], int row, int col) {
+    
+    // p-1 <-> p <-> p+1
+    // Need to send miniMatrix row to both p-1 and p+1
+    // Need to recieve a miniMatrix row from both p-1 and p+1
+    // After send/recv construct a new matrix with the recieved rows
+    //   - Compute GoL statemachine for the cell
+    
+    // After new matrix is created (miniMatrix + 2 rows (one added at beginnin one at end)
+    //   - Cell we check is [tempRow][col]  
+    //      - tempRow = row(row# in full matrix) % #processors + 1(offset for added 2 rows)
+    
+    return DEAD;
+}
 
+// Finished, just need to implement DetermineState
+void Simulate(int miniMatrix[][width]) {
+    int i, j;
+
+    for(i = 0; i < genCount; i++) {
+        // Make sure each process finishes the generation before starting the next one
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        for(j = 0; j < (width * width)/p; j++) {
+            int cellRow, cellColumn;
+            // Get the coord of cell (based on full matrix (width x width)
+            cellColumn = j % width;
+            // fullMatrixRow =  row index from miniMatrix + (numRows * processor#)
+            cellRow = (j/width) + (width/p) * rank;
+
+            int newState = DetermineState(miniMatrix, cellRow, cellColumn);
+
+            miniMatrix[j/width][j%width] = newState;
+        }
+
+        // Display buffer 
+        if(i % displayCount == 0) {
+            DisplayGoL(miniMatrix, i);
+        } 
+    }
 }
 
 // in progress
@@ -116,20 +160,20 @@ void Simulate(){
 //                            7 8
 //  When we add these submatrices into a full 4x4 matrix, the 2x4 memory layout doesn't need to be reordered but the 4x2 would 
 //  need to be reordered
-void DisplayGoL(int miniMatrix[][width]){
+void DisplayGoL(int miniMatrix[][width], int generation){
     int fullMatrix[width][width];
    
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Printing out in memory layout of mini matrices for debugging help
     // remove before turning in. 
-    int *x = miniMatrix[0];
-    int i = 0;
-    printf("RANK: %d - ", rank);
-    for(i; i < (width*width/p); i++) {
-        printf("%d ", x[i]);
-    }
-    printf("\n");
+    //int *x = miniMatrix[0];
+    //int i = 0;
+    //printf("RANK: %d - ", rank);
+    //for(i; i < (width*width/p); i++) {
+    //    printf("%d ", x[i]);
+    //}
+    //printf("\n");
 
     // Needed to help get the correct order of sub matrices inside the full Matrix
     if(rank == ROOT) {
@@ -139,21 +183,32 @@ void DisplayGoL(int miniMatrix[][width]){
          MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, NULL, 0, MPI_INT, ROOT, MPI_COMM_WORLD);
     }
     
-    // Can remove this Barrier when we remove the above debugging code
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // Only root displays the matrix since it gathered every other miniMatrix
     if (rank == ROOT) {
-        int i, j;
-      
-        printf("----COMBINED MATRIX----\n");
-        for(i = 0; i < width; i++) {
-            for(j = 0; j < width; j++) {    
-                printf("%d ", fullMatrix[i][j]);
-            }
-            printf("\n");
-        }
-        printf("-----------------------\n");
+        outputMatrix(fullMatrix, generation);
     }
+}
+
+void outputMatrix(int fullMatrix[][width], int generation) {
+    int i, j;
+    
+    printf("===== Matrix at Generation %d =====\n", generation + 1);
+    printf("   ");
+    for(i = 0; i < width; i++) {
+        printf("%d ", i);
+    }
+    printf("\n");    
+    for(i = 0; i < width; i++) {
+        printf("%d  ", i);
+        for(j = 0; j < width; j++) {
+            if (fullMatrix[i][j] == ALIVE) {
+                printf("A ");
+            } else {
+                printf("D ");
+            }
+        }
+        printf("\n");
+    }
+    printf("==================================\n");
 }
 
