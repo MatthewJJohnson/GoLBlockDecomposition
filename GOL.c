@@ -17,8 +17,8 @@
 int width, genCount, displayCount, rank, p, miniMatrixSize;
 
 long initialGenerationTime;
-long totalCommunicationTime;//all communication steps
-long totalGenerationTime;//G sums of time taken to generate
+long totalCommunicationTime; //all communication steps
+long totalGenerationTime; //G sums of time taken to generate
 
 int main(int argc,char *argv[])
 {
@@ -27,9 +27,9 @@ int main(int argc,char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD,&p);
 
     srand(time(NULL));
-    totalGenerationtime = 0L;
+    totalGenerationTime = 0L;
     totalCommunicationTime = 0L;
-    initalGenerationTime = 0L;
+    initialGenerationTime = 0L;
 
     printf("my rank=%d\n",rank);
     printf("Rank=%d: number of processes =%d\n",rank,p);
@@ -62,10 +62,13 @@ int main(int argc,char *argv[])
     GenerateInitialGoL(miniMatrix);
     Simulate(miniMatrix);
 
-    printf("CLOCK Total Communication Time: %ld \n", totalCommunicationTime); 
-    printf("CLOCK Total Computation Time: %ld \n", (totalGenerationTime+initalGenerationTime)-totalCommunicationTime);
-    printf("CLOCK Total Run Time: %ld \n", totalGenerationTime+initalGenerationTime); 
-    printf("CLOCK Average Generation Time: %ld \n", totalGenerationTime/genCount);  
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("RANK: %d | CLOCK Total Communication Time: %ld usec\n", rank, totalCommunicationTime); 
+    printf("RANK: %d | CLOCK Total Computation Time: %ld usec\n", rank, (totalGenerationTime+initialGenerationTime)-totalCommunicationTime);
+    printf("RANK: %d | CLOCK Total Run Time: %ld usec\n", rank, totalGenerationTime+initialGenerationTime); 
+    printf("RANK: %d | CLOCK Average Generation Time: %ld usec\n", rank, totalGenerationTime/genCount);  
+    
     MPI_Finalize();
 
     return 0;
@@ -77,7 +80,6 @@ void GenerateInitialGoL(int miniMatrix[][width]){
     //Step Two: Each rank locally generates (using the passed seed) a distinct sequence of values to fill in the matrix as alive or dead. 
 
     //Step One
-    //REF:
     int seed = 0; //each processors seed after the random numbers are distributed
     int randomNumbers[p]; //List of random numbers to be sent to each process. Buffer is size p for p processes 
     struct timeval start, end, start1, end1;
@@ -91,72 +93,83 @@ void GenerateInitialGoL(int miniMatrix[][width]){
     }
     
     gettimeofday(&start1, NULL);
+    // Broadcast i random numbers to the i processors
     MPI_Bcast(randomNumbers, p, MPI_INT, ROOT, MPI_COMM_WORLD);
     gettimeofday(&end1, NULL);
-    long commStep = (end1.tv_sec-start1.tv_sec)*1000000 + (end1.tv_usec-start1.tv_usec);
+    
+    long commStep = ((end1.tv_sec * 1000000 + end1.tv_usec) - (start1.tv_sec * 1000000 + start1.tv_usec));
     totalCommunicationTime += commStep;
 
+    // ith random number handed over to rank i
     seed = randomNumbers[rank];
     printf("RANK: %d recieves random number: %d\n", rank, seed);
 
     //Step Two
     srand(time(NULL) + seed); //redefine random with the seed since every rank after root was getting the same value 
+    
+    int *tempMini = miniMatrix[0];
     int index=0;
+    // Set tempMini with all the Alive/Dead values then we can just copy it into miniMatrix
+    // (width^2)/p is number of elements in miniMatrixi
     for(index; index < (width*width)/p; index++){
         int parity = rand() % BIGPRIME + 1;
 
         //50-50 chance of a cell being alive or dead based on if the status of even or odd (parity)
-        printf("Processor %d generated Cell[%d][%d] as ", rank, index/width, index%width);
         if(parity % 2 == 0){
-            miniMatrix[index/width][index%width] = ALIVE;
-            printf("ALIVE\n");
+            tempMini[index] = ALIVE;  
         }
         else{
-            miniMatrix[index/width][index%width] = DEAD;
-            printf("DEAD\n");
+            tempMini[index] = DEAD;
         }
     }
-    gettimeofday(&end, NULL);
-    initialGenerationtime += (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
 
-    //Verification Step
+    // Copy tempMini into miniMatrix
+    memcpy(miniMatrix, tempMini, miniMatrixSize);
+    
+    gettimeofday(&end, NULL);
+    initialGenerationTime += ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+    
+    //Verification Step, -1 represents the initialization
     DisplayGoL(miniMatrix, -1);
 }
 
-// TODO
 // Return the new state of a given cell
 // Need to get the cell's 8 neighbors (will need to send/recv rows from other processors since
 //  we're using a TORUS topology)
 int DetermineState(int miniMatrix[][width], int row, int col) {
+    struct timeval start, end;
+    
     MPI_Status status;
     
     int tempFirstRow[width], tempLastRow[width];
-    int numTempMatrixRows = (width / p) + 2;
-    
+    int numTempMatrixRows = (width / p) + 2;    
     int tempMatrix[numTempMatrixRows][width];
-    // Need to send miniMatrix row to both p-1 and p+1
-    // Need to recieve a miniMatrix row from both p-1 and p+1
+    // Need to send 2 miniMatrix rows (first and last) to both p-1 and p+1
+    // Need to recieve 2 rows from both p-1 and p+1
     
-    // Sending and recv p-1 and p+1 rows for every cell to make it easier
-    // Send first and last row of current rank so miniMatrix[0] and miniMatrix[(width/p) - 1]
-    struct timeval start, end;
+    // Since we are using a TORUS topology, the ranks need wrap around e.g. p=4 then rank0 - 1 = rank3 and rank3 + 1 = rank0
+    // REF: https://codereview.stackexchange.com/questions/57923/index-into-array-as-if-it-is-circular
+    int prevRank = (rank - 1 % p + p) % p;
+    int nextRank = (rank + 1) % p;
+
     gettimeofday(&start, NULL);
-    MPI_Send(miniMatrix[0], width, MPI_INT, (rank - 1 + p) % p, 0, MPI_COMM_WORLD);
-    MPI_Recv(tempLastRow, width, MPI_INT, (rank + 1) % p, 0, MPI_COMM_WORLD, &status);
+    MPI_Send(miniMatrix[0], width, MPI_INT, prevRank, 0, MPI_COMM_WORLD); // send first row
+    MPI_Recv(tempLastRow, width, MPI_INT, nextRank, 0, MPI_COMM_WORLD, &status);
    
-    MPI_Send(miniMatrix[(width/p) - 1], width, MPI_INT, (rank + 1) % p, 0, MPI_COMM_WORLD);
-    MPI_Recv(tempFirstRow, width, MPI_INT, (rank - 1 + p) % p, 0, MPI_COMM_WORLD, &status);
+    MPI_Send(miniMatrix[(width/p) - 1], width, MPI_INT, nextRank, 0, MPI_COMM_WORLD); // send last row
+    MPI_Recv(tempFirstRow, width, MPI_INT, prevRank, 0, MPI_COMM_WORLD, &status);
     gettimeofday(&end, NULL);
-    long commStep = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
+   
+    long commStep = ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
     totalCommunicationTime += commStep;
     
-    // After send/recv construct a new matrix with the recieved rows
-    //   - Compute GoL statemachine for the cell
-    
+    // Construct tempMatrix, copy in new first and last row
     memcpy(tempMatrix[0], tempFirstRow, sizeof(tempFirstRow));
     memcpy(tempMatrix[1], miniMatrix, miniMatrixSize);
     memcpy(tempMatrix[numTempMatrixRows - 1], tempLastRow, sizeof(tempLastRow));
 
+    // Debugging helper to make sure tempMatrix was assembled correctly
+//    MPI_Barrier(MPI_COMM_WORLD);
 //    int x, y;
 //    printf("RANK: %d\n", rank);
 //    for(x = 0; x < (width/p) + 2; x++) {
@@ -169,16 +182,21 @@ int DetermineState(int miniMatrix[][width], int row, int col) {
     row += 1; // new row in tempMatrix, shift by 1 since we added a row at the beginning
     int aliveCount = 0;
     
-    aliveCount += tempMatrix[row - 1][(col - 1 + width) % width];
-    aliveCount += tempMatrix[row - 1][ col];
-    aliveCount += tempMatrix[row - 1][(col + 1) % width];
+    // Same as when we send/recv from ranks
+    int prevCol = (col - 1 % width + width) % width;
+    int nextCol = (col + 1) % width;
+
+    // Add up a cells 8 neighbors
+    aliveCount += tempMatrix[row - 1][prevCol];
+    aliveCount += tempMatrix[row - 1][col];
+    aliveCount += tempMatrix[row - 1][nextCol];
         
-    aliveCount += tempMatrix[row + 1][(col - 1 + width) % width];
+    aliveCount += tempMatrix[row + 1][prevCol];
     aliveCount += tempMatrix[row + 1][col];
-    aliveCount += tempMatrix[row + 1][(col + 1) % width];
+    aliveCount += tempMatrix[row + 1][nextCol];
         
-    aliveCount += tempMatrix[row][(col - 1 + width) % width];
-    aliveCount += tempMatrix[row][(col + 1) % width];
+    aliveCount += tempMatrix[row][prevCol];
+    aliveCount += tempMatrix[row][nextCol];
     
     //printf("RANK: %d [%d][%d] ALIVECOUNT = %d\n", rank, row-1, col, aliveCount);
 
@@ -190,24 +208,24 @@ int DetermineState(int miniMatrix[][width], int row, int col) {
     }
 }
 
-// Finished, just need to implement DetermineState
 void Simulate(int miniMatrix[][width]) {
     int i, j;
     int tempMiniMatrix[width/p][width];
-    struct timeval start, end;
-
+    struct timeval start, end, communicationStart, communicationEnd;
 
     for(i = 0; i < genCount; i++) {
+        // Start timer for total runtime of simulate, cant do outside for loop since we dont time display
+        gettimeofday(&start, NULL);
+
+        gettimeofday(&communicationStart, NULL);        
         // Make sure each process finishes the generation before starting the next one
-        
-        gettimeofday(&start, NULL);        
         MPI_Barrier(MPI_COMM_WORLD);
-        gettimeofday(&end, NULL);
-        long commStep = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
+        gettimeofday(&communicationEnd, NULL);
+    
+        long commStep = ((communicationEnd.tv_sec * 1000000 + communicationEnd.tv_usec) - (communicationStart.tv_sec * 1000000 + communicationStart.tv_usec));
         totalCommunicationTime += commStep;
 
         // (width^2)/p is number of elements in the miniMatrix
-        gettimeofday(&start, NULL);
         for(j = 0; j < (width * width)/p; j++) {
             int curRow = j / width;
             int curCol = j % width;
@@ -217,40 +235,28 @@ void Simulate(int miniMatrix[][width]) {
             // Make a copy of the MiniMatrix with the new states
             tempMiniMatrix[curRow][curCol] = newState;
         }
-        gettimeofday(&end, NULL);
-        totalGenerationtime += (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
-
+        
         // After check all the states, update the miniMatrix with the new states
         // This is because we use the prev gen for all of the checking so we cant update the board as we 
-        // check or it break the game rules
+        // check or it will corrupt the game
         memcpy(miniMatrix, tempMiniMatrix, sizeof(tempMiniMatrix));
 
-        // Display buffer 
+        gettimeofday(&end, NULL);
+        totalGenerationTime += ((end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec));
+       
+        // Display buffer, dont record its time. 
         if(i % displayCount == 0) {
             DisplayGoL(miniMatrix, i);
         } 
     }
 }
 
-// in progress
-// *Switching our decomposition from column to row since the memory layout of our mini matrix makes it easier to gather in the 
-// full matrix. 
-// E.g. miniMatrix[0] = { 1, 2, 3, 4, 5, 6, 7, 8 } can represent a 4x2 Matrix and 2x4 Matrix
-//  With a 4x2 Matrix it goes 1 2   and a 2x4 Matrix is 1 2 3 4 
-//                            3 4                       5 6 7 8
-//                            5 6
-//                            7 8
-//  When we add these submatrices into a full 4x4 matrix, the 2x4 memory layout doesn't need to be reordered but the 4x2 would 
-//  need to be reordered
 void DisplayGoL(int miniMatrix[][width], int generation){
     int fullMatrix[width][width];
-    struct timeval start, end;
 
-    gettimeofday(&start, NULL);        
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Printing out in memory layout of mini matrices for debugging help
-    // remove before turning in. 
+    // Printing out memory layout of miniMatrix for debugging help
 //    int *x = miniMatrix[0];
 //    int i = 0;
 //    printf("RANK: %d - ", rank);
@@ -260,10 +266,7 @@ void DisplayGoL(int miniMatrix[][width], int generation){
 //    printf("\n");
 
     MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, fullMatrix[0], (width * width)/p, MPI_INT, ROOT, MPI_COMM_WORLD);
-    gettimeofday(&end, NULL);
-    long commStep = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
-    totalCommunicationTime += commStep;
-    
+
     // Only root displays the matrix since it gathered every other miniMatrix
     if (rank == ROOT) {
         outputMatrix(fullMatrix, generation);
