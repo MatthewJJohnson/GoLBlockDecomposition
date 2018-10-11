@@ -33,8 +33,9 @@ int main(int argc,char *argv[])
 
     width = atoi(tempWidth);
     genCount = atoi(tempG);
+
     displayCount = 1; //we will simply display after each generation, e.g. 2 would be after every other gen
-    printf("N = %d, G = %d\n", width, genCount);
+    printf("Width(N) = %d, G = %d\n", width, genCount);
 
     printf("Checking that the number of processors is power of 2 and N is divisible by p...\n");
     if(p != 0 && (p & (p - 1)) == 0 && width % p == 0) 
@@ -64,26 +65,28 @@ int main(int argc,char *argv[])
 
 void GenerateInitialGoL(int miniMatrix[][width]){
     //Two Step function
-    //Step One: rank 0 generates p random prime numbers and <i>distributes</i> them to the other ranks. Instuctor hinted at the MPI function, 'MPI_Scatter'
+    //Step One: rank 0 generates p random prime numbers and <i>distributes</i> them to the other ranks.
     //Step Two: Each rank locally generates (using the passed seed) a distinct sequence of values to fill in the matrix as alive or dead. 
 
     //Step One
-    //REF: www.mpi-forum.org/docs/mpi-1.1/mpi-11-html/node72.html
-    int scatteredSeed = 0;//save our seed from the scatter
-    int toBeScattered[p];//MPI_Scatter takes a sendbuf (toBeScattered) and splits the buffer between the processes. buffer is size p for p processes 
+    //REF:
+    int seed = 0; //each processors seed after the random numbers are distributed
+    int randomNumbers[p]; //List of random numbers to be sent to each process. Buffer is size p for p processes 
     
     if(rank == ROOT){
         int i = 0; //must define outside for loop in MPI
         for(i; i < p; i++){
-            toBeScattered[i] = rand() % BIGPRIME + 1; //rand starts at 0, off by 1
+            randomNumbers[i] = rand() % BIGPRIME + 1; //rand starts at 0, off by 1
         }
     }
-    MPI_Scatter(toBeScattered, 1, MPI_INT, &scatteredSeed, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
-    printf("RANK: %d recieves random number: %d\n", rank, scatteredSeed);
+    MPI_Bcast(randomNumbers, p, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    seed = randomNumbers[rank];
+    printf("RANK: %d recieves random number: %d\n", rank, seed);
 
     //Step Two
-    srand(time(NULL) + scatteredSeed); //redefine random with the seed since every rank after root was getting the same value 
+    srand(time(NULL) + seed); //redefine random with the seed since every rank after root was getting the same value 
     int index=0;
     for(index; index < (width*width)/p; index++){
         int parity = rand() % BIGPRIME + 1;
@@ -175,21 +178,21 @@ void DisplayGoL(int miniMatrix[][width], int generation){
 
     // Printing out in memory layout of mini matrices for debugging help
     // remove before turning in. 
-    //int *x = miniMatrix[0];
-    //int i = 0;
-    //printf("RANK: %d - ", rank);
-    //for(i; i < (width*width/p); i++) {
-    //    printf("%d ", x[i]);
-    //}
-    //printf("\n");
+    int *x = miniMatrix[0];
+    int i = 0;
+    printf("RANK: %d - ", rank);
+    for(i; i < (width*width/p); i++) {
+        printf("%d ", x[i]);
+    }
+    printf("\n");
 
     // Needed to help get the correct order of sub matrices inside the full Matrix
-    if(rank == ROOT) {
+//    if(rank == ROOT) {
          MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, fullMatrix[0], (width * width)/p, MPI_INT, ROOT, MPI_COMM_WORLD);
-    }
-    else {
-         MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, NULL, 0, MPI_INT, ROOT, MPI_COMM_WORLD);
-    }
+  //  }
+    //else {
+      //   MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, NULL, 0, MPI_INT, ROOT, MPI_COMM_WORLD);
+   // }
     
     // Only root displays the matrix since it gathered every other miniMatrix
     if (rank == ROOT) {
@@ -201,13 +204,7 @@ void outputMatrix(int fullMatrix[][width], int generation) {
     int i, j;
     
     printf("===== Matrix at Generation %d =====\n", generation + 1);
-    printf("   ");
     for(i = 0; i < width; i++) {
-        printf("%d ", i);
-    }
-    printf("\n");    
-    for(i = 0; i < width; i++) {
-        printf("%d  ", i);
         for(j = 0; j < width; j++) {
             if (fullMatrix[i][j] == ALIVE) {
                 printf("A ");

@@ -6,4 +6,4 @@
 
 #"np" stands for number of processes.
 #this command will run the job on 2 processes. 
-mpirun -np 4 ~/GoLBlockDecomposition/GOL 8 4
+mpirun -np 4 ~/GoLBlockDecomposition/GOL 8 3
