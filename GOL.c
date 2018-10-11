@@ -3,7 +3,6 @@
 #include <mpi.h>
 #include <assert.h>
 #include <sys/time.h>
-#include <math.h>
 
 #define ROOT 0
 #define ALIVE 1
@@ -15,7 +14,7 @@
 // CS411 Project 2
 
 //commonly referenced integers, changed from main to globals for simplicty
-int width, genCount, displayCount, aliveCount, deadCount, rank, p;
+int width, genCount, displayCount, rank, p, miniMatrixSize;
 
 int main(int argc,char *argv[])
 {
@@ -33,12 +32,9 @@ int main(int argc,char *argv[])
 
     width = atoi(tempWidth);
     genCount = atoi(tempG);
-
-    aliveCount = 0;
-    deadCount = 0;
+    printf("Width(N) = %d, G = %d\n", width, genCount);
 
     displayCount = 1; //we will simply display after each generation, e.g. 2 would be after every other gen
-    printf("Width(N) = %d, G = %d\n", width, genCount);
 
     printf("Checking that the number of processors is power of 2 and N is divisible by p...\n");
     if(p != 0 && (p & (p - 1)) == 0 && width % p == 0) 
@@ -52,12 +48,10 @@ int main(int argc,char *argv[])
     }
     
     //nxn matrix. Block composition states that a processor owns [width/p][width] cells (or [width][width/p] cells) of the matrix
-    //we will implement the [width][width/p] method. (col decomposition)
-    // ** See note above DisplayGoL, switching to row decomposition **
-
     //no need to broadcast p since its global now, begin execution
     int miniMatrix[width/p][width];    
-
+    miniMatrixSize = sizeof(miniMatrix);
+    
     GenerateInitialGoL(miniMatrix);
     Simulate(miniMatrix);
 
@@ -107,60 +101,37 @@ void GenerateInitialGoL(int miniMatrix[][width]){
     }
 
     //Verification Step
-    DisplayGoL(miniMatrix, 0);
+    DisplayGoL(miniMatrix, -1);
 }
 
 // TODO
 // Return the new state of a given cell
 // Need to get the cell's 8 neighbors (will need to send/recv rows from other processors since
 //  we're using a TORUS topology)
-int DetermineState(int miniMatrix[][width], int row, int col, int cellRank) {
-
+int DetermineState(int miniMatrix[][width], int row, int col) {
     MPI_Status status;
-    // p-1 <-> p <-> p+1
-    int previousRankRow[width], nextRankRow[width];
-    int tempMatrix[(width/p) + 2][width];
+    
+    int tempFirstRow[width], tempLastRow[width];
+    int numTempMatrixRows = (width / p) + 2;
+    
+    int tempMatrix[numTempMatrixRows][width];
     // Need to send miniMatrix row to both p-1 and p+1
     // Need to recieve a miniMatrix row from both p-1 and p+1
     
     // Sending and recv p-1 and p+1 rows for every cell to make it easier
     // Send first and last row of current rank so miniMatrix[0] and miniMatrix[(width/p) - 1]
     MPI_Send(miniMatrix[0], width, MPI_INT, (rank - 1 + p) % p, 0, MPI_COMM_WORLD);
-    MPI_Recv(nextRankRow, width, MPI_INT, (rank + 1) % p, 0, MPI_COMM_WORLD, &status);
+    MPI_Recv(tempLastRow, width, MPI_INT, (rank + 1) % p, 0, MPI_COMM_WORLD, &status);
    
     MPI_Send(miniMatrix[(width/p) - 1], width, MPI_INT, (rank + 1) % p, 0, MPI_COMM_WORLD);
-    MPI_Recv(previousRankRow, width, MPI_INT, (rank - 1 + p) % p, 0, MPI_COMM_WORLD, &status);
+    MPI_Recv(tempFirstRow, width, MPI_INT, (rank - 1 + p) % p, 0, MPI_COMM_WORLD, &status);
     
     // After send/recv construct a new matrix with the recieved rows
     //   - Compute GoL statemachine for the cell
     
-//    int numCellsInTempMatrix = ((width * width) / p) + (width * 2);
-//    int *arrayOfMiniMatrix = miniMatrix[0];
-//     int i, miniIndex = 0, nextRankIndex = 0;
-//    for(i = 0; i < numCellsInTempMatrix; i++) {
-//        if (i >= 0 && i < width) {
-//            tempMatrix[i/width][i%width] = previousRankRow[i];
-//        }
-//        else if (i >= width && i < ((width * width)/p)) {
-//            tempMatrix[i/width][i%width] = arrayOfMiniMatrix[i];
-//            miniIndex++;
-//        }
-//        else {
-//            tempMatrix[i/width][i%width] = nextRankRow[i];;
-//            nextRankIndex++;
-//        }
-//    }
-
-    int i, j;
-    for(i = 0; i < width; i++) {
-        tempMatrix[0][i] = previousRankRow[i];
-        tempMatrix[width/p + 1][i] = nextRankRow[i];
-    }
-    for(i = 1; i <= width/p; i++) {
-        for(j = 0; j < width; j++) {
-            tempMatrix[i][j] = miniMatrix[i-1][j];
-        }
-    }
+    memcpy(tempMatrix[0], tempFirstRow, sizeof(tempFirstRow));
+    memcpy(tempMatrix[1], miniMatrix, miniMatrixSize);
+    memcpy(tempMatrix[numTempMatrixRows - 1], tempLastRow, sizeof(tempLastRow));
 
 //    int x, y;
 //    printf("RANK: %d\n", rank);
@@ -170,24 +141,24 @@ int DetermineState(int miniMatrix[][width], int row, int col, int cellRank) {
 //        }
 //        printf("\n");
 //    }
-    row += 1; // new row in tempMatrix
-    int aliveC = 0;
-    if(rank == cellRank) {
-        aliveC += tempMatrix[row - 1][(col - 1 + width) % width];
-        aliveC += tempMatrix[row - 1][ col];
-        aliveC += tempMatrix[row - 1][(col + 1) % width];
-        
-        aliveC += tempMatrix[row + 1][(col - 1 + width) % width];
-        aliveC += tempMatrix[row + 1][col];
-        aliveC += tempMatrix[row + 1][(col + 1) % width];
-        
-        aliveC += tempMatrix[row][(col - 1 + width) % width];
-        aliveC += tempMatrix[row][(col + 1) % width];
+  
+    row += 1; // new row in tempMatrix, shift by 1 since we added a row at the beginning
+    int aliveCount = 0;
     
-//        printf("RANK: %d [%d][%d] ALIVECOUNT = %d\n", rank, row-1, col, aliveC);
-    }
+    aliveCount += tempMatrix[row - 1][(col - 1 + width) % width];
+    aliveCount += tempMatrix[row - 1][ col];
+    aliveCount += tempMatrix[row - 1][(col + 1) % width];
+        
+    aliveCount += tempMatrix[row + 1][(col - 1 + width) % width];
+    aliveCount += tempMatrix[row + 1][col];
+    aliveCount += tempMatrix[row + 1][(col + 1) % width];
+        
+    aliveCount += tempMatrix[row][(col - 1 + width) % width];
+    aliveCount += tempMatrix[row][(col + 1) % width];
+    
+    //printf("RANK: %d [%d][%d] ALIVECOUNT = %d\n", rank, row-1, col, aliveCount);
 
-    if (aliveC >= 3 && aliveC <= 5) {
+    if (aliveCount >= 3 && aliveCount <= 5) {
         return ALIVE;
     } 
     else {
@@ -206,16 +177,13 @@ void Simulate(int miniMatrix[][width]) {
 
         // (width^2)/p is number of elements in the miniMatrix
         for(j = 0; j < (width * width)/p; j++) {
-            int cellRow, cellColumn;
-            // Get the coord of cell (based on full matrix (width x width)
-            cellColumn = j % width;
-            // fullMatrixRow =  row index from miniMatrix + (numRows * processor#)
-            cellRow = (j/width) + (width/p) * rank;
+            int curRow = j / width;
+            int curCol = j % width;
 
-            int newState = DetermineState(miniMatrix, j/width, cellColumn, rank);
+            int newState = DetermineState(miniMatrix, curRow, curCol);
 
             // Make a copy of the MiniMatrix with the new states
-            tempMiniMatrix[j/width][j%width] = newState;
+            tempMiniMatrix[curRow][curCol] = newState;
         }
 
         // After check all the states, update the miniMatrix with the new states
@@ -250,18 +218,12 @@ void DisplayGoL(int miniMatrix[][width], int generation){
 //    int *x = miniMatrix[0];
 //    int i = 0;
 //    printf("RANK: %d - ", rank);
- //   for(i; i < (width*width/p); i++) {
- //       printf("%d ", x[i]);
-  //  }
-  //  printf("\n");
+//    for(i; i < (width*width/p); i++) {
+//        printf("%d ", x[i]);
+//    }
+//    printf("\n");
 
-    // Needed to help get the correct order of sub matrices inside the full Matrix
-//    if(rank == ROOT) {
-         MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, fullMatrix[0], (width * width)/p, MPI_INT, ROOT, MPI_COMM_WORLD);
-  //  }
-    //else {
-      //   MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, NULL, 0, MPI_INT, ROOT, MPI_COMM_WORLD);
-   // }
+    MPI_Gather(miniMatrix[0], (width * width)/p, MPI_INT, fullMatrix[0], (width * width)/p, MPI_INT, ROOT, MPI_COMM_WORLD);
     
     // Only root displays the matrix since it gathered every other miniMatrix
     if (rank == ROOT) {
